@@ -930,7 +930,7 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
 
     // Member counts for groups and channels come with the full profile.
     let kind = with_app(|app| app.dialog(peer).map(|d| d.kind.clone())).flatten();
-    if matches!(kind.as_deref(), Some("group" | "channel")) {
+    if kind.as_deref() != Some("user") {
         run(async move { chats::peer_info(tg(), peer).await }, move |info| {
             with_app(|app| {
                 if app.generation != generation {
@@ -1008,7 +1008,13 @@ fn load_topics(peer: i64, generation: u64) {
             if app.generation != generation {
                 return;
             }
-            let Ok(rows) = found else { return };
+            let rows = match found {
+                Ok(rows) => rows,
+                Err(err) => {
+                    app.chat_error(&err);
+                    return;
+                }
+            };
             app.topics = rows;
             let items: Vec<TopicItem> = app
                 .topics

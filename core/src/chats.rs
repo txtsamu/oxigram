@@ -829,6 +829,9 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
 
     use tl::enums::ChatFull;
     let mut extra = Extra::default();
+    // A peer from resolve_peer carries no channel flags, so the forum bit has
+    // to come from the fetched channel.
+    let mut forum = false;
     let (about, members) = match peer_ref.id.kind() {
         PeerKind::User => {
             let request = tl::functions::users::GetFullUser {
@@ -874,6 +877,16 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
                 ChatFull::ChannelFull(channel) => {
                     extra.muted = is_muted(&channel.notify_settings);
                     extra.online = channel.online_count.filter(|count| *count > 0);
+                    let request = tl::functions::channels::GetChannels {
+                        id: vec![(&peer_ref).into()],
+                    };
+                    if let Ok(tl::enums::messages::Chats::Chats(found)) =
+                        handles.client.invoke(&request).await
+                    {
+                        forum = found.chats.iter().any(
+                            |chat| matches!(chat, tl::enums::Chat::Channel(channel) if channel.forum),
+                        );
+                    }
                     extra.invite_link = invite_link(channel.exported_invite);
                     (channel.about, channel.participants_count)
                 }
@@ -918,7 +931,7 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
         common_chats: extra.common_chats,
         invite_link: extra.invite_link,
         muted: extra.muted,
-        forum: matches!(&peer, Peer::Channel(channel) if channel.raw.forum),
+        forum: forum || matches!(&peer, Peer::Channel(channel) if channel.raw.forum),
         media,
     })
 }
