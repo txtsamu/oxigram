@@ -941,6 +941,7 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
             app.show_subtitle(&ui, None);
             ui.set_chat_error(SharedString::new());
             ui.set_chat_forum(false);
+            ui.set_topics_open(false);
             ui.set_topic_open(false);
             ui.set_topic_title(SharedString::new());
             ui.set_topic_items(ModelRc::from(std::rc::Rc::new(VecModel::<TopicItem>::from(Vec::new()))));
