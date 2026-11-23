@@ -772,8 +772,6 @@ pub struct PeerInfo {
     pub muted: bool,
     /// The group is a forum: its chats are split into topics.
     pub forum: bool,
-    /// Slash commands a bot advertises, as (command, description).
-    pub commands: Vec<(String, String)>,
     /// Shared media, files and links in the chat, non-zero counts only.
     pub media: Vec<MediaCount>,
 }
@@ -811,6 +809,82 @@ fn invite_link(invite: Option<tl::enums::ExportedChatInvite>) -> Option<String> 
     }
 }
 
+/// Commands the bots of a chat advertise, as (bot, command, description).
+///
+/// A private chat with a bot reads them from its full profile; a group has to
+/// find the bots among its members first.
+pub async fn bot_commands(
+    tg: &Telegram,
+    peer_id: i64,
+) -> Result<Vec<(String, String, String)>, UiError> {
+    let handles = tg.handles().await?;
+    let peer_ref = resolve_peer(&handles, peer_id).await?;
+    let mut bots: Vec<(String, i64, tl::enums::InputUser)> = Vec::new();
+    match peer_ref.id.kind() {
+        PeerKind::User => bots.push((
+            String::new(),
+            peer_ref.id.bare_id().unwrap_or_default(),
+            (&peer_ref).into(),
+        )),
+        PeerKind::Channel => {
+            let request = tl::functions::channels::GetParticipants {
+                channel: (&peer_ref).into(),
+                filter: tl::enums::ChannelParticipantsFilter::ChannelParticipantsBots,
+                offset: 0,
+                limit: 100,
+                hash: 0,
+            };
+            let list = handles.client.invoke(&request).await?;
+            if let tl::enums::channels::ChannelParticipants::Participants(list) = list {
+                for user in list.users {
+                    let tl::enums::User::User(user) = user else {
+                        continue;
+                    };
+                    bots.push((
+                        user.first_name.clone().unwrap_or_default(),
+                        user.id,
+                        tl::enums::InputUser::User(tl::types::InputUser {
+                            user_id: user.id,
+                            access_hash: user.access_hash.unwrap_or_default(),
+                        }),
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    let mut commands = Vec::new();
+    for (name, user_id, bot) in bots {
+        let request = tl::functions::users::GetFullUser { id: bot };
+        let Ok(tl::enums::users::UserFull::Full(full)) = handles.client.invoke(&request).await else {
+            continue;
+        };
+        let tl::enums::UserFull::Full(user) = full.full_user;
+        let name = if name.is_empty() {
+            full.users
+                .iter()
+                .find_map(|user| match user {
+                    tl::enums::User::User(user) if user.id == user_id => {
+                        Some(user.first_name.clone().unwrap_or_default())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default()
+        } else {
+            name
+        };
+        let Some(tl::enums::BotInfo::Info(info)) = user.bot_info else {
+            continue;
+        };
+        for command in info.commands.unwrap_or_default() {
+            let tl::enums::BotCommand::Command(command) = command;
+            commands.push((name.clone(), command.command, command.description));
+        }
+    }
+    Ok(commands)
+}
+
 pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError> {
     let handles = tg.handles().await?;
     let peer_ref = resolve_peer(&handles, peer_id).await?;
@@ -834,7 +908,6 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
     // A peer from resolve_peer carries no channel flags, so the forum bit has
     // to come from the fetched channel.
     let mut forum = false;
-    let mut commands = Vec::new();
     let (about, members) = match peer_ref.id.kind() {
         PeerKind::User => {
             let request = tl::functions::users::GetFullUser {
@@ -844,18 +917,6 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
             let tl::enums::UserFull::Full(user) = full.full_user;
             extra.muted = is_muted(&user.notify_settings);
             extra.common_chats = (user.common_chats_count > 0).then_some(user.common_chats_count);
-            if let Some(tl::enums::BotInfo::Info(bot)) = user.bot_info {
-                commands = bot
-                    .commands
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|command| match command {
-                        tl::enums::BotCommand::Command(command) => {
-                            Some((command.command, command.description))
-                        }
-                    })
-                    .collect();
-            }
             extra.birthday = user.birthday.map(|tl::enums::Birthday::Birthday(day)| match day.year {
                 Some(year) => format!("{:02}.{:02}.{year}", day.day, day.month),
                 None => format!("{:02}.{:02}", day.day, day.month),
@@ -947,7 +1008,6 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
         invite_link: extra.invite_link,
         muted: extra.muted,
         forum: forum || matches!(&peer, Peer::Channel(channel) if channel.raw.forum),
-        commands,
         media,
     })
 }

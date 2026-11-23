@@ -622,15 +622,23 @@ fn wire_main(ui: &AppWindow) {
             .flatten();
             if let Some(peer) = target {
                 open_chat_at(peer, None);
-                let command = want == "1";
                 slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
-                    if !command {
-                        return;
+                    let topic = with_app(|app| {
+                        let generation = app.generation;
+                        app.topics
+                            .first()
+                            .map(|topic| (peer, topic.id, topic.title.clone(), generation))
+                    })
+                    .flatten();
+                    if let Some((peer, id, title, generation)) = topic {
+                        open_topic(peer, id, title.as_str(), generation);
                     }
-                    with_app(|app| {
-                        if let Some(ui) = app.ui.upgrade() {
-                            ui.invoke_set_composer("/".into());
-                        }
+                    slint::Timer::single_shot(std::time::Duration::from_secs(2), || {
+                        with_app(|app| {
+                            if let Some(ui) = app.ui.upgrade() {
+                                ui.invoke_set_composer("/".into());
+                            }
+                        });
                     });
                 });
             }
@@ -982,9 +990,6 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
                 }
                 if let (Ok(info), Some(ui)) = (info, app.ui.upgrade()) {
                     app.show_subtitle(&ui, Some((info.members, info.online)));
-                    app.bot_commands = info.commands.clone();
-                    let text = ui.get_composer_text();
-                    commands::suggest(&ui, &app.bot_commands, text.as_str());
                     if info.forum {
                         app.forum = true;
                         app.topics_open = true;
@@ -998,6 +1003,9 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
                 mark_read(peer);
             }
         });
+    }
+    if bot || kind.as_deref() != Some("user") {
+        load_bot_commands(peer, generation);
     }
 
     // Jumping to a found message shows the history around it; the chat is
@@ -1047,6 +1055,33 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
     if unread {
         mark_read(peer);
     }
+}
+
+/// Slash commands the bots of this chat advertise.
+fn load_bot_commands(peer: i64, generation: u64) {
+    run(async move { chats::bot_commands(tg(), peer).await }, move |found| {
+        with_app(|app| {
+            if app.generation != generation {
+                return;
+            }
+            let Ok(found) = found else { return };
+            let bots: std::collections::HashSet<&str> = found.iter().map(|row| row.0.as_str()).collect();
+            app.bot_commands = found
+                .iter()
+                .map(|(bot, command, description)| {
+                    let description = if bots.len() > 1 && !bot.is_empty() {
+                        format!("{bot} · {description}")
+                    } else {
+                        description.clone()
+                    };
+                    (command.clone(), description)
+                })
+                .collect();
+            let Some(ui) = app.ui.upgrade() else { return };
+            let text = ui.get_composer_text();
+            commands::suggest(&ui, &app.bot_commands, text.as_str());
+        });
+    });
 }
 
 fn load_topics(peer: i64, generation: u64) {
