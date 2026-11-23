@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use grammers_client::message::Message;
 use grammers_client::peer::{Dialog, Peer};
 use grammers_client::tl;
+use grammers_client::tl::enums::ChatFull;
 use grammers_session::Session;
 use grammers_session::types::{PeerId, PeerKind, PeerRef};
 use serde::Serialize;
@@ -840,6 +841,7 @@ pub async fn bot_commands(
         let infos = match full.full_chat {
             ChatFull::ChannelFull(channel) => channel.bot_info,
             ChatFull::Full(chat) => chat.bot_info.unwrap_or_default(),
+            ChatFull::CommunityFull(_) => Vec::new(),
         };
         let mut found = Vec::new();
         for tl::enums::BotInfo::Info(info) in infos {
