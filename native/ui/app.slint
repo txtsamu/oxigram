@@ -4924,16 +4924,19 @@ export component AppWindow inherits Window {
                     // The bot's commands, over the field while "/" is typed.
                     if root.commands-open: Rectangle {
                         x: 12px;
-                        y: -root.command-items.length * 40px - 14px;
+                        y: -(min(root.command-items.length, 8) * 40px) - 14px;
                         width: min(parent.width - 24px, 420px);
-                        height: root.command-items.length * 40px + 8px;
+                        height: min(root.command-items.length, 8) * 40px + 8px;
                         border-radius: 10px;
                         background: Theme.menu;
                         border-width: 1px;
                         border-color: Theme.border;
                         drop-shadow-blur: 14px;
                         drop-shadow-color: #00000066;
-                        VerticalLayout {
+                        ScrollView {
+                            width: 100%;
+                            height: 100%;
+                            VerticalLayout {
                             padding: 4px;
                             for item[i] in root.command-items: Rectangle {
                                 height: 40px;
@@ -4964,6 +4967,7 @@ export component AppWindow inherits Window {
                                         overflow: elide;
                                     }
                                 }
+                            }
                             }
                         }
                     }
