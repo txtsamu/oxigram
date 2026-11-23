@@ -17,6 +17,7 @@ use windows::Win32::Media::MediaFoundation::{
     MFARGB, MFCreateAttributes, MFSTARTUP_FULL, MFStartup, MFVideoNormalizedRect,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx};
+use oxigram_core::tr;
 use windows::core::{BSTR, implement};
 
 use super::{Frame, Options, Player};
@@ -201,11 +202,11 @@ impl Player for MfPlayer {
         let error = unsafe { self.engine.GetError() }.ok()?;
         let code = unsafe { error.GetErrorCode() };
         (code != 0).then(|| match code {
-            1 => "Playback aborted".to_owned(),
-            2 => "File read error".to_owned(),
-            3 => "Could not decode the video".to_owned(),
-            4 => "This video format is not supported by the system".to_owned(),
-            _ => format!("Playback error ({code})"),
+            1 => tr!("Playback aborted"),
+            2 => tr!("File read error"),
+            3 => tr!("Could not decode the video"),
+            4 => tr!("This video format is not supported by the system"),
+            _ => tr!("Playback error ({})", code),
         })
     }
 }
