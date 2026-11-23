@@ -938,9 +938,14 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
     tg().ui.set_active_chat(Some(peer));
     request_avatar(peer);
 
-    // Member counts for groups and channels come with the full profile.
-    let kind = with_app(|app| app.dialog(peer).map(|d| d.kind.clone())).flatten();
-    if kind.as_deref() != Some("user") {
+    // Member counts for groups and channels come with the full profile, and a
+    // bot's slash commands do too.
+    let (kind, bot) = with_app(|app| {
+        let dialog = app.dialog(peer);
+        (dialog.map(|d| d.kind.clone()), dialog.is_some_and(|d| d.bot))
+    })
+    .unwrap_or_default();
+    if bot || kind.as_deref() != Some("user") {
         run(async move { chats::peer_info(tg(), peer).await }, move |info| {
             with_app(|app| {
                 if app.generation != generation {
@@ -950,7 +955,7 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
                     app.show_subtitle(&ui, Some((info.members, info.online)));
                     app.bot_commands = info.commands.clone();
                     let text = ui.get_composer_text();
-                    commands::suggest(&app.bot_commands, text.as_str());
+                    commands::suggest(&ui, &app.bot_commands, text.as_str());
                     if info.forum {
                         app.forum = true;
                         app.topics_open = true;

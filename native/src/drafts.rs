@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use slint::ComponentHandle;
+
 use crate::messages::Compose;
 use crate::{AppWindow, with_app};
 
@@ -127,7 +129,8 @@ fn write_now() {
 
 pub fn wire(window: &AppWindow) {
     // Every change of the composer lands here, typed or set by the program.
-    window.on_composer_changed(|text| {
+    let weak = window.as_weak();
+    window.on_composer_changed(move |text| {
         // An edit shows the message's own text in the field: not a draft.
         let Some((Some(peer), editing)) = with_app(|app| (app.chat, matches!(app.compose, Compose::Edit(_)))) else {
             return;
@@ -136,7 +139,9 @@ pub fn wire(window: &AppWindow) {
             set(peer, text.as_str());
         }
         let commands = with_app(|app| app.bot_commands.clone()).unwrap_or_default();
-        crate::commands::suggest(&commands, text.as_str());
+        if let Some(ui) = weak.upgrade() {
+            crate::commands::suggest(&ui, &commands, text.as_str());
+        }
     });
 }
 

@@ -3,10 +3,10 @@
 use slint::{Model, ModelRc, VecModel};
 use std::rc::Rc;
 
-use crate::{CommandItem, with_app};
+use crate::{AppWindow, CommandItem, with_app};
 
 /// The commands matching what is typed so far, or the popup closing.
-pub fn suggest(commands: &[(String, String)], text: &str) {
+pub fn suggest(ui: &AppWindow, commands: &[(String, String)], text: &str) {
     let typed = text.strip_prefix('/').filter(|rest| !rest.contains(char::is_whitespace));
     let matches: Vec<CommandItem> = match typed {
         Some(prefix) if !commands.is_empty() => commands
@@ -19,12 +19,9 @@ pub fn suggest(commands: &[(String, String)], text: &str) {
             .collect(),
         _ => Vec::new(),
     };
-    with_app(|app| {
-        let Some(ui) = app.ui.upgrade() else { return };
-        let open = !matches.is_empty();
-        ui.set_command_items(ModelRc::from(Rc::new(VecModel::from(matches))));
-        ui.set_commands_open(open);
-    });
+    let open = !matches.is_empty();
+    ui.set_command_items(ModelRc::from(Rc::new(VecModel::from(matches))));
+    ui.set_commands_open(open);
 }
 
 /// Puts the picked command in the field and closes the list.
