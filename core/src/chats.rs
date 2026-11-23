@@ -819,6 +819,50 @@ pub async fn bot_commands(
 ) -> Result<Vec<(String, String, String)>, UiError> {
     let handles = tg.handles().await?;
     let peer_ref = resolve_peer(&handles, peer_id).await?;
+    // A group's full profile lists its bots with their commands: the way the
+    // official apps get them, and it works where the member list is hidden.
+    let full = match peer_ref.id.kind() {
+        PeerKind::Channel => {
+            let request = tl::functions::channels::GetFullChannel {
+                channel: (&peer_ref).into(),
+            };
+            handles.client.invoke(&request).await.ok()
+        }
+        PeerKind::Chat => {
+            let request = tl::functions::messages::GetFullChat {
+                chat_id: peer_ref.id.bare_id().unwrap_or_default(),
+            };
+            handles.client.invoke(&request).await.ok()
+        }
+        _ => None,
+    };
+    if let Some(tl::enums::messages::ChatFull::Full(full)) = full {
+        let infos = match full.full_chat {
+            ChatFull::ChannelFull(channel) => channel.bot_info,
+            ChatFull::Full(chat) => chat.bot_info.unwrap_or_default(),
+        };
+        let mut found = Vec::new();
+        for tl::enums::BotInfo::Info(info) in infos {
+            let name = full
+                .users
+                .iter()
+                .find_map(|user| match user {
+                    tl::enums::User::User(user) if Some(user.id) == info.user_id => {
+                        Some(user.first_name.clone().unwrap_or_default())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            for command in info.commands.unwrap_or_default() {
+                let tl::enums::BotCommand::Command(command) = command;
+                found.push((name.clone(), command.command, command.description));
+            }
+        }
+        if !found.is_empty() {
+            return Ok(found);
+        }
+    }
+
     let mut bots: Vec<(String, i64, tl::enums::InputUser)> = Vec::new();
     match peer_ref.id.kind() {
         PeerKind::User => bots.push((
