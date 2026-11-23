@@ -121,6 +121,8 @@ struct App {
     topic_title: String,
     topics: Vec<oxigram_core::chats::TopicRow>,
     topics_open: bool,
+    /// Topic lists seen so far, so a forum opens with its list at once.
+    forums: HashMap<i64, Vec<oxigram_core::chats::TopicRow>>,
     forum: bool,
     /// Slash commands of the open bot chat.
     bot_commands: Vec<(String, String)>,
@@ -273,6 +275,7 @@ fn main() {
             topic_title: String::new(),
             topics: Vec::new(),
             topics_open: false,
+            forums: HashMap::new(),
             forum: false,
             bot_commands: Vec::new(),
             messages: Vec::new(),
@@ -945,6 +948,15 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
             ui.set_topic_open(false);
             ui.set_topic_title(SharedString::new());
             ui.set_topic_items(ModelRc::from(std::rc::Rc::new(VecModel::<TopicItem>::from(Vec::new()))));
+            // A forum seen before shows its list right away; the fresh one replaces it.
+            if let Some(rows) = app.forums.get(&peer).cloned() {
+                app.forum = true;
+                app.topics_open = true;
+                app.topics = rows;
+                ui.set_chat_forum(true);
+                ui.set_topics_open(true);
+                apply_topics(app);
+            }
             app.bot_commands.clear();
             ui.set_commands_open(false);
             ui.set_command_items(ModelRc::from(std::rc::Rc::new(VecModel::<CommandItem>::from(
@@ -1098,6 +1110,7 @@ fn load_topics(peer: i64, generation: u64) {
                     return Vec::new();
                 }
             };
+            app.forums.insert(peer, rows.clone());
             app.topics = rows;
             apply_topics(app);
             missing_icons(app)
