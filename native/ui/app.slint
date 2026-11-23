@@ -58,12 +58,18 @@ export struct ButtonRow {
 export struct TopicItem {
     id: int,
     title: string,
+    emoji: image,
     unread: int,
     pinned: bool,
     closed: bool,
     color: color,
 }
 
+
+export struct CommandItem {
+    name: string,
+    description: string,
+}
 export struct DialogItem {
     title: string,
     initial: string,
@@ -3378,6 +3384,9 @@ export component AppWindow inherits Window {
     in property <[TopicItem]> topic-items;
     callback open-topics();
     callback pick-topic(int);
+    in property <[CommandItem]> command-items;
+    in-out property <bool> commands-open;
+    callback pick-command(int);
     callback close-topic();
 
     // Chat folders (tabs above the list); index 0 is "Все чаты"
@@ -4911,6 +4920,53 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+
+                    // The bot's commands, over the field while "/" is typed.
+                    if root.commands-open: Rectangle {
+                        x: 12px;
+                        y: -root.command-items.length * 40px - 14px;
+                        width: min(parent.width - 24px, 420px);
+                        height: root.command-items.length * 40px + 8px;
+                        border-radius: 10px;
+                        background: Theme.menu;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        drop-shadow-blur: 14px;
+                        drop-shadow-color: #00000066;
+                        VerticalLayout {
+                            padding: 4px;
+                            for item[i] in root.command-items: Rectangle {
+                                height: 40px;
+                                border-radius: 6px;
+                                background: command-touch.has-hover ? Theme.hover : transparent;
+                                command-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.pick-command(i);
+                                    }
+                                }
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 10px;
+                                    Text {
+                                        text: item.name;
+                                        color: Theme.accent;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: item.description;
+                                        color: Theme.dim;
+                                        font-size: 13px;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -4948,7 +5004,12 @@ export component AppWindow inherits Window {
                                         height: 34px;
                                         border-radius: 17px;
                                         background: item.color;
-                                        Text {
+                                        if item.emoji.width > 0: Image {
+                                            width: 26px;
+                                            height: 26px;
+                                            source: item.emoji;
+                                        }
+                                        if item.emoji.width == 0: Text {
                                             text: "#";
                                             color: Theme.accent-text;
                                             font-size: 15px;

@@ -772,6 +772,8 @@ pub struct PeerInfo {
     pub muted: bool,
     /// The group is a forum: its chats are split into topics.
     pub forum: bool,
+    /// Slash commands a bot advertises, as (command, description).
+    pub commands: Vec<(String, String)>,
     /// Shared media, files and links in the chat, non-zero counts only.
     pub media: Vec<MediaCount>,
 }
@@ -832,6 +834,7 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
     // A peer from resolve_peer carries no channel flags, so the forum bit has
     // to come from the fetched channel.
     let mut forum = false;
+    let mut commands = Vec::new();
     let (about, members) = match peer_ref.id.kind() {
         PeerKind::User => {
             let request = tl::functions::users::GetFullUser {
@@ -841,6 +844,18 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
             let tl::enums::UserFull::Full(user) = full.full_user;
             extra.muted = is_muted(&user.notify_settings);
             extra.common_chats = (user.common_chats_count > 0).then_some(user.common_chats_count);
+            if let Some(tl::enums::BotInfo::Info(bot)) = user.bot_info {
+                commands = bot
+                    .commands
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|command| match command {
+                        tl::enums::BotCommand::Command(command) => {
+                            Some((command.command, command.description))
+                        }
+                    })
+                    .collect();
+            }
             extra.birthday = user.birthday.map(|tl::enums::Birthday::Birthday(day)| match day.year {
                 Some(year) => format!("{:02}.{:02}.{year}", day.day, day.month),
                 None => format!("{:02}.{:02}", day.day, day.month),
@@ -932,6 +947,7 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
         invite_link: extra.invite_link,
         muted: extra.muted,
         forum: forum || matches!(&peer, Peer::Channel(channel) if channel.raw.forum),
+        commands,
         media,
     })
 }

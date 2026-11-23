@@ -135,6 +135,8 @@ pub fn wire(window: &AppWindow) {
         if !editing {
             set(peer, text.as_str());
         }
+        let commands = with_app(|app| app.bot_commands.clone()).unwrap_or_default();
+        crate::commands::suggest(&commands, text.as_str());
     });
 }
 

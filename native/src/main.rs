@@ -17,6 +17,7 @@ mod context_menu;
 mod drafts;
 mod files;
 mod folders;
+mod commands;
 mod countries;
 mod format;
 mod i18n;
@@ -121,6 +122,8 @@ struct App {
     topics: Vec<oxigram_core::chats::TopicRow>,
     topics_open: bool,
     forum: bool,
+    /// Slash commands of the open bot chat.
+    bot_commands: Vec<(String, String)>,
     /// The open chat's messages, oldest first, one per row of `message_model`.
     messages: Vec<MessageRow>,
     message_model: Rc<VecModel<MessageItem>>,
@@ -271,6 +274,7 @@ fn main() {
             topics: Vec::new(),
             topics_open: false,
             forum: false,
+            bot_commands: Vec::new(),
             messages: Vec::new(),
             message_model,
             history_done: false,
@@ -606,6 +610,7 @@ fn wire_main(ui: &AppWindow) {
     ui.on_open_topics(open_topics);
     ui.on_pick_topic(pick_topic);
     ui.on_close_topic(close_topic);
+    ui.on_pick_command(commands::pick);
     ui.on_open_chat(|index| {
         let peer = with_app(|app| app.shown.get(index as usize).copied()).flatten();
         if let Some(peer) = peer {
@@ -902,6 +907,11 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
             ui.set_topic_open(false);
             ui.set_topic_title(SharedString::new());
             ui.set_topic_items(ModelRc::from(std::rc::Rc::new(VecModel::<TopicItem>::from(Vec::new()))));
+            app.bot_commands.clear();
+            ui.set_commands_open(false);
+            ui.set_command_items(ModelRc::from(std::rc::Rc::new(VecModel::<CommandItem>::from(
+                Vec::new(),
+            ))));
             app.show_chat_rights(&ui);
             ui.set_chat_open(true);
             ui.set_history_loading(true);
@@ -938,6 +948,9 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
                 }
                 if let (Ok(info), Some(ui)) = (info, app.ui.upgrade()) {
                     app.show_subtitle(&ui, Some((info.members, info.online)));
+                    app.bot_commands = info.commands.clone();
+                    let text = ui.get_composer_text();
+                    commands::suggest(&app.bot_commands, text.as_str());
                     if info.forum {
                         app.forum = true;
                         app.topics_open = true;
@@ -1004,35 +1017,62 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
 
 fn load_topics(peer: i64, generation: u64) {
     run(async move { chats::topics(tg(), peer).await }, move |found| {
-        with_app(|app| {
+        let missing = with_app(|app| {
             if app.generation != generation {
-                return;
+                return Vec::new();
             }
             let rows = match found {
                 Ok(rows) => rows,
                 Err(err) => {
                     app.chat_error(&err);
-                    return;
+                    return Vec::new();
                 }
             };
             app.topics = rows;
-            let items: Vec<TopicItem> = app
-                .topics
-                .iter()
-                .map(|topic| TopicItem {
-                    id: topic.id,
-                    title: topic.title.clone().into(),
-                    unread: topic.unread,
-                    pinned: topic.pinned,
-                    closed: topic.closed,
-                    color: format::avatar_color(i64::from(topic.icon_color)),
-                })
-                .collect();
-            if let Some(ui) = app.ui.upgrade() {
-                ui.set_topic_items(ModelRc::from(Rc::new(VecModel::from(items))));
-            }
+            apply_topics(app);
+            missing_icons(app)
         });
+        for id in missing.unwrap_or_default() {
+            reactions::request_emoji(id);
+        }
     });
+}
+
+/// The topic rows with the icons they already have decoded.
+fn topic_items(app: &App) -> Vec<TopicItem> {
+    app.topics
+        .iter()
+        .map(|topic| TopicItem {
+            id: topic.id,
+            title: topic.title.clone().into(),
+            emoji: topic
+                .icon_emoji_id
+                .as_ref()
+                .and_then(|id| app.emoji.images.get(id))
+                .cloned()
+                .unwrap_or_default(),
+            unread: topic.unread,
+            pinned: topic.pinned,
+            closed: topic.closed,
+            color: format::avatar_color(i64::from(topic.icon_color)),
+        })
+        .collect()
+}
+
+fn apply_topics(app: &mut App) {
+    let items = topic_items(app);
+    if let Some(ui) = app.ui.upgrade() {
+        ui.set_topic_items(ModelRc::from(Rc::new(VecModel::from(items))));
+    }
+}
+
+/// Custom emoji the topic list still has to decode.
+fn missing_icons(app: &App) -> Vec<String> {
+    app.topics
+        .iter()
+        .filter_map(|topic| topic.icon_emoji_id.clone())
+        .filter(|id| !app.emoji.images.contains_key(id))
+        .collect()
 }
 
 fn open_topics() {

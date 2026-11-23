@@ -29,7 +29,7 @@ const EMOJI_PX: f32 = 18.0;
 /// Pictures of custom emoji reactions, by document ID.
 #[derive(Default)]
 pub struct Emoji {
-    images: HashMap<String, Image>,
+    pub(crate) images: HashMap<String, Image>,
     pending: HashSet<String>,
 }
 
@@ -276,9 +276,17 @@ fn error_text(err: &oxigram_core::error::UiError) -> String {
 }
 
 /// Fetches a custom emoji picture, decoded to the chip's size.
-fn request_emoji(id: String) {
+pub(crate) fn request_emoji(id: String) {
     let Some(Some(px)) = with_app(|app| {
-        if !app.settings.custom_emoji || app.emoji.images.contains_key(&id) || app.emoji.pending.contains(&id) {
+        // A forum topic icon is worth decoding even with message emoji off.
+        let topic_icon = app
+            .topics
+            .iter()
+            .any(|topic| topic.icon_emoji_id.as_deref() == Some(id.as_str()));
+        if (!app.settings.custom_emoji && !topic_icon)
+            || app.emoji.images.contains_key(&id)
+            || app.emoji.pending.contains(&id)
+        {
             return None;
         }
         app.emoji.pending.insert(id.clone());
@@ -310,6 +318,14 @@ fn request_emoji(id: String) {
                     pixels.height(),
                 );
                 app.emoji.images.insert(id.clone(), Image::from_rgba8(buffer));
+                // A forum topic may use this emoji as its icon.
+                if app
+                    .topics
+                    .iter()
+                    .any(|topic| topic.icon_emoji_id.as_deref() == Some(id.as_str()))
+                {
+                    crate::apply_topics(app);
+                }
                 // Redraw every bubble that shows this emoji.
                 let custom = format!("{CUSTOM}{id}");
                 let rows: Vec<usize> = app
