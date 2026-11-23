@@ -966,6 +966,7 @@ mod tests {
             grouped_id: None,
             reactions: Vec::new(),
             reply_to_id: None,
+            topic_id: None,
             entities: Vec::new(),
             web: None,
         }

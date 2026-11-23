@@ -40,6 +40,19 @@ pub struct PeerSummary {
     pub photo_id: Option<String>,
 }
 
+/// A forum topic, as the topic list shows it.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicRow {
+    pub id: i32,
+    pub title: String,
+    pub unread: i32,
+    pub pinned: bool,
+    pub closed: bool,
+    pub icon_color: i32,
+    pub icon_emoji_id: Option<String>,
+}
+
 /// The dialog list as it was last seen, for an instant first paint.
 pub async fn cached_dialogs(tg: &Telegram) -> Result<Vec<DialogRow>, UiError> {
     let Handles { db, .. } = tg.handles().await?;
@@ -136,6 +149,82 @@ pub async fn history(
     Ok(rows)
 }
 
+/// The forum topics of a group, pinned first as Telegram orders them.
+pub async fn topics(tg: &Telegram, peer_id: i64) -> Result<Vec<TopicRow>, UiError> {
+    let handles = tg.handles().await?;
+    let peer = resolve_peer(&handles, peer_id).await?;
+    let request = tl::functions::messages::GetForumTopics {
+        peer: (&peer).into(),
+        q: None,
+        offset_date: 0,
+        offset_id: 0,
+        offset_topic: 0,
+        limit: 100,
+    };
+    let tl::enums::messages::ForumTopics::Topics(found) = handles.client.invoke(&request).await?;
+    Ok(found
+        .topics
+        .into_iter()
+        .filter_map(|topic| match topic {
+            tl::enums::ForumTopic::Topic(topic) => Some(TopicRow {
+                id: topic.id,
+                title: topic.title,
+                unread: topic.unread_count,
+                pinned: topic.pinned,
+                closed: topic.closed,
+                icon_color: topic.icon_color,
+                icon_emoji_id: topic.icon_emoji_id.map(|id| id.to_string()),
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Messages of one forum topic, newest first, older than `before_id`.
+pub async fn topic_history(
+    tg: &Telegram,
+    peer_id: i64,
+    topic_id: i32,
+    before_id: Option<i32>,
+    limit: usize,
+) -> Result<Vec<MessageRow>, UiError> {
+    let handles = tg.handles().await?;
+    let peer = resolve_peer(&handles, peer_id).await?;
+    let limit = limit.clamp(1, MAX_HISTORY_PAGE);
+    let request = tl::functions::messages::GetReplies {
+        peer: (&peer).into(),
+        msg_id: topic_id,
+        offset_id: before_id.unwrap_or(0),
+        offset_date: 0,
+        add_offset: 0,
+        limit: limit as i32,
+        max_id: 0,
+        min_id: 0,
+        hash: 0,
+    };
+    let page = match handles.client.invoke(&request).await? {
+        tl::enums::messages::Messages::Messages(page) => page.messages,
+        tl::enums::messages::Messages::Slice(page) => page.messages,
+        tl::enums::messages::Messages::ChannelMessages(page) => page.messages,
+        tl::enums::messages::Messages::NotModified(_) => Vec::new(),
+    };
+    let ids: Vec<i32> = page
+        .into_iter()
+        .filter_map(|message| match message {
+            tl::enums::Message::Message(message) => Some(message.id),
+            _ => None,
+        })
+        .collect();
+    let mut rows = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(100) {
+        let found = handles.client.get_messages_by_id(peer, chunk).await?;
+        for message in found.into_iter().flatten() {
+            rows.push(message_row(&message, peer_id));
+        }
+    }
+    Ok(rows)
+}
+
 /// One page of a chat's shared media of one kind ("media" = photos and
 /// videos, "file", "link", "voice", "audio"), newest first, older than
 /// `before_id`. Not cached: the profile panel asks for it on demand.
@@ -205,6 +294,7 @@ pub async fn send_message(
     peer_id: i64,
     text: &str,
     reply_to: Option<i32>,
+    topic: Option<i32>,
 ) -> Result<MessageRow, UiError> {
     let text = text.trim();
     if text.is_empty() {
@@ -219,15 +309,67 @@ pub async fn send_message(
     // **bold**, __italic__, `code`… as typed in Telegram Desktop.
     let (plain, entities) = crate::markup::parse(text);
     let message = grammers_client::message::InputMessage::new()
-        .text(plain)
-        .fmt_entities(entities)
+        .text(plain.clone())
+        .fmt_entities(entities.clone())
         .reply_to(reply_to);
-    let sent = handles.client.send_message(peer, message).await?;
+    let sent = match topic {
+        None => handles.client.send_message(peer, message).await?,
+        Some(topic) => {
+            let request = tl::functions::messages::SendMessage {
+                no_webpage: false,
+                silent: false,
+                background: false,
+                clear_draft: false,
+                noforwards: false,
+                update_stickersets_order: false,
+                invert_media: false,
+                allow_paid_floodskip: false,
+                peer: (&peer).into(),
+                reply_to: Some(tl::enums::InputReplyTo::Message(tl::types::InputReplyToMessage {
+                    reply_to_msg_id: reply_to.unwrap_or(topic),
+                    top_msg_id: Some(topic),
+                    reply_to_peer_id: None,
+                    quote_text: None,
+                    quote_entities: None,
+                    quote_offset: None,
+                    monoforum_peer_id: None,
+                    todo_item_id: None,
+                    poll_option: None,
+                    quote_rich: None,
+                })),
+                message: plain,
+                random_id: random_id(),
+                reply_markup: None,
+                entities: Some(entities),
+                schedule_date: None,
+                schedule_repeat_period: None,
+                send_as: None,
+                quick_reply_shortcut: None,
+                effect: None,
+                allow_paid_stars: None,
+                suggested_post: None,
+                rich_message: None,
+            };
+            let updates = handles.client.invoke(&request).await?;
+            match sent_id(&updates) {
+                Some(id) => handles
+                    .client
+                    .get_messages_by_id(peer, &[id])
+                    .await?
+                    .into_iter()
+                    .flatten()
+                    .next()
+                    .ok_or_else(|| UiError::internal("the sent message was not found"))?,
+                None => return Err(UiError::internal("Telegram did not return the sent message")),
+            }
+        }
+    };
     let mut row = message_row(&sent, peer_id);
     // The short update for a sent message carries no reply header.
     if row.reply_to_id.is_none() {
         row.reply_to_id = reply_to;
     }
+    row.topic_id = topic;
     with_db(&handles.db, |conn| {
         cache::save_messages(conn, std::slice::from_ref(&row))
     })?;
@@ -628,6 +770,8 @@ pub struct PeerInfo {
     /// The chat's invite link, when the user may see it.
     pub invite_link: Option<String>,
     pub muted: bool,
+    /// The group is a forum: its chats are split into topics.
+    pub forum: bool,
     /// Shared media, files and links in the chat, non-zero counts only.
     pub media: Vec<MediaCount>,
 }
@@ -774,6 +918,7 @@ pub async fn peer_info(tg: &Telegram, peer_id: i64) -> Result<PeerInfo, UiError>
         common_chats: extra.common_chats,
         invite_link: extra.invite_link,
         muted: extra.muted,
+        forum: matches!(&peer, Peer::Channel(channel) if channel.raw.forum),
         media,
     })
 }
@@ -1164,6 +1309,7 @@ pub fn message_row(message: &Message, peer_id: i64) -> MessageRow {
         buttons: buttons(message),
         grouped_id: message.grouped_id().map(|id| id.to_string()),
         reply_to_id: message.reply_to_message_id(),
+        topic_id: topic_id(message),
         entities: if message.action().is_some() {
             Vec::new()
         } else {
@@ -1186,6 +1332,51 @@ pub fn message_row(message: &Message, peer_id: i64) -> MessageRow {
             },
             _ => 0,
         },
+    }
+}
+
+/// The forum topic a message belongs to, from its reply header.
+fn topic_id(message: &Message) -> Option<i32> {
+    match &message.raw {
+        tl::enums::Message::Message(raw) => match &raw.reply_to {
+            Some(tl::enums::MessageReplyHeader::Header(header)) if header.forum_topic => {
+                header.reply_to_top_id.or(header.reply_to_msg_id)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A random ID for `messages.sendMessage`, unique enough for one client.
+fn random_id() -> i64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or_default();
+    nanos ^ (std::process::id() as i64) << 40
+}
+
+/// The ID of the message a sent update carries.
+fn sent_id(updates: &tl::enums::Updates) -> Option<i32> {
+    fn of_update(update: &tl::enums::Update) -> Option<i32> {
+        let message = match update {
+            tl::enums::Update::NewMessage(update) => &update.message,
+            tl::enums::Update::NewChannelMessage(update) => &update.message,
+            _ => return None,
+        };
+        match message {
+            tl::enums::Message::Message(message) => Some(message.id),
+            _ => None,
+        }
+    }
+    match updates {
+        tl::enums::Updates::UpdateShortSentMessage(update) => Some(update.id),
+        tl::enums::Updates::UpdateShort(update) => of_update(&update.update),
+        tl::enums::Updates::Updates(update) => update.updates.iter().find_map(of_update),
+        tl::enums::Updates::Combined(update) => update.updates.iter().find_map(of_update),
+        tl::enums::Updates::TooLong => None,
+        tl::enums::Updates::UpdateShortMessage(_) | tl::enums::Updates::UpdateShortChatMessage(_) => None,
     }
 }
 

@@ -571,7 +571,7 @@ fn go(caption: SharedString, compress: bool) {
         crate::menus::toast(tr!("The caption is longer than 1024 characters"));
         return;
     }
-    let Some(Some((peer, compose))) = with_app(|app| app.chat.map(|peer| (peer, app.compose))) else {
+    let Some(Some((peer, compose, topic))) = with_app(|app| app.chat.map(|peer| (peer, app.compose, app.topic))) else {
         return;
     };
     let reply = match compose {
@@ -626,7 +626,7 @@ fn go(caption: SharedString, compress: bool) {
     st(|s| s.running = None);
 
     let Some(runtime) = RUNTIME.get() else { return };
-    let handle = runtime.spawn(send_all(peer, caption, reply, groups));
+    let handle = runtime.spawn(send_all(peer, caption, reply, topic, groups));
     st(|s| {
         s.send = Some(Active {
             abort: handle.abort_handle(),
@@ -646,12 +646,12 @@ fn post(f: impl FnOnce() + Send + 'static) {
     let _ = slint::invoke_from_event_loop(f);
 }
 
-async fn send_all(peer: i64, caption: String, reply: Option<i32>, groups: Vec<Vec<Job>>) {
+async fn send_all(peer: i64, caption: String, reply: Option<i32>, topic: Option<i32>, groups: Vec<Vec<Job>>) {
     for (index, group) in groups.into_iter().enumerate() {
         let text = if index == 0 { caption.clone() } else { String::new() };
         let reply_to = if index == 0 { reply } else { None };
         let tokens: Vec<String> = group.iter().map(|j| j.token.clone()).collect();
-        match send_group(peer, group, text, reply_to).await {
+        match send_group(peer, group, text, reply_to, topic).await {
             Ok(rows) => post(move || {
                 with_app(|app| {
                     for row in rows {
@@ -691,6 +691,7 @@ async fn send_group(
     group: Vec<Job>,
     caption: String,
     reply: Option<i32>,
+    topic: Option<i32>,
 ) -> Result<Vec<MessageRow>, UiError> {
     if group.len() == 1 {
         let job = group.into_iter().next().expect("one job");
@@ -699,7 +700,8 @@ async fn send_group(
             peer_id: peer,
             name: job.name,
             caption,
-            reply_to: reply,
+            reply_to: reply.or(topic),
+            topic,
             as_photo: job.as_photo,
             token: job.token,
             video: job.video,
@@ -716,7 +718,7 @@ async fn send_group(
             video: job.video.map(|(s, w, h)| format!("{s},{w},{h}")).unwrap_or_default(),
         });
     }
-    actions::send_album(tg(), peer, items, &caption, reply).await
+    actions::send_album(tg(), peer, items, &caption, reply.or(topic)).await
 }
 
 /// Readable text for what can go wrong while sending a file.

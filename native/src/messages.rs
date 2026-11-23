@@ -232,7 +232,7 @@ fn send_text(text: SharedString) {
     if text.trim().is_empty() {
         return;
     }
-    let Some(Some((peer, compose))) = with_app(|app| app.chat.map(|peer| (peer, app.compose))) else {
+    let Some(Some((peer, compose, topic))) = with_app(|app| app.chat.map(|peer| (peer, app.compose, app.topic))) else {
         return;
     };
     if let Some(ui) = ui() {
@@ -275,7 +275,7 @@ fn send_text(text: SharedString) {
                 _ => None,
             };
             run(
-                async move { chats::send_message(tg(), peer, &text, reply_to).await },
+                async move { chats::send_message(tg(), peer, &text, reply_to, topic).await },
                 move |sent| {
                     with_app(|app| match sent {
                         Ok(row) => app.add_message(row),

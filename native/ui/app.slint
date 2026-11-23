@@ -55,6 +55,15 @@ export struct ButtonRow {
     items: [KeyButton],
 }
 
+export struct TopicItem {
+    id: int,
+    title: string,
+    unread: int,
+    pinned: bool,
+    closed: bool,
+    color: color,
+}
+
 export struct DialogItem {
     title: string,
     initial: string,
@@ -3361,6 +3370,15 @@ export component AppWindow inherits Window {
     in-out property <int> selecting-id: -1;
     in property <bool> chat-muted;
     callback toggle-mute();
+    // A forum: the chat is split into topics, the header offers the list.
+    in property <bool> chat-forum;
+    in property <bool> topics-open;
+    in property <bool> topic-open;
+    in property <string> topic-title;
+    in property <[TopicItem]> topic-items;
+    callback open-topics();
+    callback pick-topic(int);
+    callback close-topic();
 
     // Chat folders (tabs above the list); index 0 is "Все чаты"
     in property <[FolderTab]> folder-tabs;
@@ -4202,6 +4220,28 @@ export component AppWindow inherits Window {
                 Rectangle {
                     height: 52px;
                     background: Theme.raised;
+                    // The topic list of a forum, left of the magnifier.
+                    if root.chat-forum: Rectangle {
+                        x: parent.width - 92px;
+                        y: 8px;
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 18px;
+                        z: 5;
+                        background: topics-touch.has-hover ? Theme.hover : transparent;
+                        topics-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.open-topics();
+                            }
+                        }
+                        StrokeIcon {
+                            x: 8px;
+                            y: 8px;
+                            stroke-width: 2px;
+                            commands: "M4 6h16M4 12h16M4 18h16";
+                        }
+                    }
                     // The magnifier at the right edge searches the chat.
                     Rectangle {
                         x: parent.width - 48px;
@@ -4235,7 +4275,25 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         VerticalLayout {
                             alignment: center;
-                            Avatar {
+                            if root.topic-open: Rectangle {
+                                width: 36px;
+                                height: 36px;
+                                border-radius: 18px;
+                                background: topic-back.has-hover ? Theme.hover : transparent;
+                                topic-back := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.close-topic();
+                                    }
+                                }
+                                StrokeIcon {
+                                    x: 8px;
+                                    y: 8px;
+                                    stroke-width: 2px;
+                                    commands: "M15 5l-7 7 7 7";
+                                }
+                            }
+                            if !root.topic-open: Avatar {
                                 size: 36px;
                                 initial: root.chat-initial;
                                 tint: root.chat-color;
@@ -4248,7 +4306,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             alignment: center;
                             Text {
-                                text: root.chat-title;
+                                text: root.topic-open ? root.topic-title : root.chat-title;
                                 color: Theme.text;
                                 font-weight: 600;
                                 font-size: 15px;
@@ -4689,8 +4747,8 @@ export component AppWindow inherits Window {
                     // depend on its own width.
                     property <length> side: max(12px, (self.width - Theme.column) / 2 + 16px);
                     // Hidden, not removed: functions above reach the composer.
-                    visible: root.chat-can-post;
-                    height: root.chat-can-post ? bar.preferred-height + self.strip : 0;
+                    visible: root.chat-can-post && !root.topics-open;
+                    height: root.chat-can-post && !root.topics-open ? bar.preferred-height + self.strip : 0;
                     Rectangle {
                         y: 0;
                         height: 1px;
@@ -4855,6 +4913,75 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+
+                // A forum: the chat body is the topic list.
+                if root.topics-open: Rectangle {
+                    y: 52px;
+                    width: parent.width - (root.info-open && root.info-docked ? root.info-width : 0px);
+                    height: parent.height - 52px;
+                    background: Theme.chat-top;
+                    clip: true;
+                    TouchArea {
+                        scroll-event(event) => {
+                            accept
+                        }
+                    }
+                    VerticalLayout {
+                        padding-top: 6px;
+                        for item[index] in root.topic-items: Rectangle {
+                            height: 56px;
+                            background: topic-touch.has-hover ? Theme.hover : transparent;
+                            topic-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.pick-topic(index);
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 16px;
+                                spacing: 12px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 34px;
+                                        height: 34px;
+                                        border-radius: 17px;
+                                        background: item.color;
+                                        Text {
+                                            text: "#";
+                                            color: Theme.accent-text;
+                                            font-size: 15px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: item.title;
+                                    color: Theme.text;
+                                    font-size: 15px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                if item.unread > 0: Rectangle {
+                                    width: 22px;
+                                    height: 22px;
+                                    border-radius: 11px;
+                                    background: Theme.accent;
+                                    Text {
+                                        text: "\{item.unread}";
+                                        color: Theme.accent-text;
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
             // ---- Profile column (like Telegram Web's chat info)
             if root.info-open && root.chat-open: Rectangle {

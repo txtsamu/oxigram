@@ -92,6 +92,9 @@ pub struct MessageRow {
     pub reactions: Vec<Reaction>,
     /// The message this one answers, in the same chat.
     pub reply_to_id: Option<i32>,
+    /// The forum topic the message belongs to. Not cached, like `waveform`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_id: Option<i32>,
     /// A channel post's comments: how many there are, 0 when it has no
     /// discussion group.
     pub comments: i32,
@@ -501,6 +504,7 @@ pub fn load_messages(
                 grouped_id: row.get(14)?,
                 reactions: decode_reactions(&row.get::<_, String>(15)?),
                 reply_to_id: row.get(16)?,
+                topic_id: None,
                 entities: serde_json::from_str(&row.get::<_, String>(17)?).unwrap_or_default(),
                 web: row
                     .get::<_, Option<String>>(18)?
@@ -563,6 +567,7 @@ mod tests {
             grouped_id: None,
             reactions: Vec::new(),
             reply_to_id: None,
+            topic_id: None,
             comments: 0,
             entities: Vec::new(),
             web: None,

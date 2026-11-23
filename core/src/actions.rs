@@ -371,6 +371,8 @@ pub struct OutgoingFile {
     pub name: String,
     pub caption: String,
     pub reply_to: Option<i32>,
+    /// The forum topic the file goes to.
+    pub topic: Option<i32>,
     /// Send a picture compressed as a photo rather than as a file.
     pub as_photo: bool,
     /// Ties upload progress events to this file.
@@ -437,7 +439,8 @@ pub async fn send_file_with_thumb(
         message.document(uploaded)
     };
     let sent = handles.client.send_message(peer, message).await?;
-    let row = chats::message_row(&sent, file.peer_id);
+    let mut row = chats::message_row(&sent, file.peer_id);
+    row.topic_id = file.topic;
     with_db(&handles.db, |conn| cache::save_messages(conn, std::slice::from_ref(&row)))?;
     Ok(row)
 }

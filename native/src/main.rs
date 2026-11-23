@@ -115,6 +115,12 @@ struct App {
     avatar_order: VecDeque<i64>,
     avatar_pending: HashSet<i64>,
     chat: Option<i64>,
+    /// The open forum topic, when the chat is a forum.
+    topic: Option<i32>,
+    topic_title: String,
+    topics: Vec<oxigram_core::chats::TopicRow>,
+    topics_open: bool,
+    forum: bool,
     /// The open chat's messages, oldest first, one per row of `message_model`.
     messages: Vec<MessageRow>,
     message_model: Rc<VecModel<MessageItem>>,
@@ -260,6 +266,11 @@ fn main() {
             avatar_order: VecDeque::new(),
             avatar_pending: HashSet::new(),
             chat: None,
+            topic: None,
+            topic_title: String::new(),
+            topics: Vec::new(),
+            topics_open: false,
+            forum: false,
             messages: Vec::new(),
             message_model,
             history_done: false,
@@ -592,6 +603,9 @@ fn show_state(result: Result<UiState, UiError>) {
 // ---- Dialog list ---------------------------------------------------------
 
 fn wire_main(ui: &AppWindow) {
+    ui.on_open_topics(open_topics);
+    ui.on_pick_topic(pick_topic);
+    ui.on_close_topic(close_topic);
     ui.on_open_chat(|index| {
         let peer = with_app(|app| app.shown.get(index as usize).copied()).flatten();
         if let Some(peer) = peer {
@@ -853,6 +867,11 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
     let Some(generation) = with_app(|app| {
         app.chat = Some(peer);
         app.generation += 1;
+        app.topic = None;
+        app.topic_title.clear();
+        app.topics.clear();
+        app.topics_open = false;
+        app.forum = false;
         app.messages.clear();
         app.message_model.clear();
         app.thumbs.clear();
@@ -879,6 +898,10 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
             app.show_chat_photo(&ui);
             app.show_subtitle(&ui, None);
             ui.set_chat_error(SharedString::new());
+            ui.set_chat_forum(false);
+            ui.set_topic_open(false);
+            ui.set_topic_title(SharedString::new());
+            ui.set_topic_items(ModelRc::from(std::rc::Rc::new(VecModel::<TopicItem>::from(Vec::new()))));
             app.show_chat_rights(&ui);
             ui.set_chat_open(true);
             ui.set_history_loading(true);
@@ -915,8 +938,18 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
                 }
                 if let (Ok(info), Some(ui)) = (info, app.ui.upgrade()) {
                     app.show_subtitle(&ui, Some((info.members, info.online)));
+                    if info.forum {
+                        app.forum = true;
+                        app.topics_open = true;
+                        ui.set_chat_forum(true);
+                        ui.set_topics_open(true);
+                    }
                 }
             });
+            if with_app(|app| app.forum && app.generation == generation).unwrap_or(false) {
+                load_topics(peer, generation);
+                mark_read(peer);
+            }
         });
     }
 
@@ -969,6 +1002,120 @@ fn open_chat_at(peer: i64, target: Option<i32>) {    pictures::close_viewer();
     }
 }
 
+fn load_topics(peer: i64, generation: u64) {
+    run(async move { chats::topics(tg(), peer).await }, move |found| {
+        with_app(|app| {
+            if app.generation != generation {
+                return;
+            }
+            let Ok(rows) = found else { return };
+            app.topics = rows;
+            let items: Vec<TopicItem> = app
+                .topics
+                .iter()
+                .map(|topic| TopicItem {
+                    id: topic.id,
+                    title: topic.title.clone().into(),
+                    unread: topic.unread,
+                    pinned: topic.pinned,
+                    closed: topic.closed,
+                    color: format::avatar_color(i64::from(topic.icon_color)),
+                })
+                .collect();
+            if let Some(ui) = app.ui.upgrade() {
+                ui.set_topic_items(ModelRc::from(Rc::new(VecModel::from(items))));
+            }
+        });
+    });
+}
+
+fn open_topics() {
+    let Some(Some((peer, generation))) = with_app(|app| app.chat.map(|peer| (peer, app.generation))) else {
+        return;
+    };
+    with_app(|app| {
+        app.topics_open = true;
+        if let Some(ui) = app.ui.upgrade() {
+            ui.set_topics_open(true);
+        }
+    });
+    load_topics(peer, generation);
+}
+
+fn pick_topic(index: i32) {
+    let Some(Some((peer, generation, topic))) = with_app(|app| {
+        let topic = app.topics.get(index as usize).cloned()?;
+        Some((app.chat?, app.generation, topic))
+    }) else {
+        return;
+    };
+    open_topic(peer, topic.id, &topic.title, generation);
+}
+
+fn open_topic(peer: i64, topic: i32, title: &str, generation: u64) {
+    with_app(|app| {
+        if app.generation != generation {
+            return;
+        }
+        app.topic = Some(topic);
+        app.topic_title = title.to_owned();
+        app.topics_open = false;
+        app.compose = messages::Compose::None;
+        app.messages.clear();
+        app.message_model.clear();
+        app.thumbs.clear();
+        app.replies.clear();
+        app.selected.clear();
+        app.history_done = false;
+        app.history_loading = true;
+        if let Some(ui) = app.ui.upgrade() {
+            ui.set_topics_open(false);
+            ui.set_topic_open(true);
+            ui.set_topic_title(title.into());
+            ui.set_history_loading(true);
+            ui.invoke_scroll_to_bottom();
+        }
+    });
+    run(
+        async move { chats::topic_history(tg(), peer, topic, None, HISTORY_PAGE).await },
+        move |page| {
+            with_app(|app| {
+                if app.generation != generation || app.topic != Some(topic) {
+                    return;
+                }
+                app.history_loading = false;
+                if let Some(ui) = app.ui.upgrade() {
+                    ui.set_history_loading(false);
+                }
+                match page {
+                    Ok(mut rows) => {
+                        app.history_done = rows.len() < HISTORY_PAGE;
+                        rows.reverse();
+                        app.set_messages(rows);
+                    }
+                    Err(err) => app.chat_error(&err),
+                }
+            });
+        },
+    );
+}
+
+fn close_topic() {
+    with_app(|app| {
+        app.topic = None;
+        app.topic_title.clear();
+        app.topics_open = true;
+        app.messages.clear();
+        app.message_model.clear();
+        app.history_done = true;
+        if let Some(ui) = app.ui.upgrade() {
+            ui.set_topic_open(false);
+            ui.set_topic_title(SharedString::new());
+            ui.set_topics_open(true);
+        }
+    });
+}
+
 fn mark_read(peer: i64) {
     run(async move { chats::mark_read(tg(), peer).await }, move |done| {
         if done.is_ok() {
@@ -983,7 +1130,7 @@ fn mark_read(peer: i64) {
 }
 
 fn load_older() {
-    let Some(Some((peer, before, generation))) = with_app(|app| {
+    let Some(Some((peer, before, generation, topic))) = with_app(|app| {
         if app.history_loading || app.history_done {
             return None;
         }
@@ -993,12 +1140,17 @@ fn load_older() {
         if let Some(ui) = app.ui.upgrade() {
             ui.set_history_loading(true);
         }
-        Some((peer, before, app.generation))
+        Some((peer, before, app.generation, app.topic))
     }) else {
         return;
     };
     run(
-        async move { chats::history(tg(), peer, Some(before), HISTORY_PAGE).await },
+        async move {
+            match topic {
+                Some(topic) => chats::topic_history(tg(), peer, topic, Some(before), HISTORY_PAGE).await,
+                None => chats::history(tg(), peer, Some(before), HISTORY_PAGE).await,
+            }
+        },
         move |page| {
             with_app(|app| {
                 if app.generation != generation {
@@ -1424,6 +1576,9 @@ impl App {
     /// A message sent from here or arriving live in the open chat.
     fn add_message(&mut self, row: MessageRow) {
         if self.chat != Some(row.peer_id) {
+            return;
+        }
+        if self.topic.is_some() && row.topic_id != self.topic {
             return;
         }
         if let Some(index) = self.messages.iter().position(|m| m.id == row.id) {
