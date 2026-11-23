@@ -201,11 +201,11 @@ impl Player for MfPlayer {
         let error = unsafe { self.engine.GetError() }.ok()?;
         let code = unsafe { error.GetErrorCode() };
         (code != 0).then(|| match code {
-            1 => "Воспроизведение прервано".to_owned(),
-            2 => "Ошибка чтения файла".to_owned(),
-            3 => "Не удалось декодировать видео".to_owned(),
-            4 => "Этот формат видео не поддерживается системой".to_owned(),
-            _ => format!("Ошибка воспроизведения ({code})"),
+            1 => "Playback aborted".to_owned(),
+            2 => "File read error".to_owned(),
+            3 => "Could not decode the video".to_owned(),
+            4 => "This video format is not supported by the system".to_owned(),
+            _ => format!("Playback error ({code})"),
         })
     }
 }

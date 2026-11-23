@@ -46,9 +46,9 @@ fn layout_shot() {
     ui.set_stage("ready".into());
     let dialogs: Vec<DialogItem> = (0..14)
         .map(|i| DialogItem {
-            title: format!("Чат {i} 🇩🇪🇫🇷 с длинным названием").into(),
-            initial: "Ч".into(),
-            preview: "Последнее сообщение в этом чате, довольно длинное, чтобы обрезаться".into(),
+            title: format!("Chat {i} 🇩🇪🇫🇷 with a long name").into(),
+            initial: "C".into(),
+            preview: "The last message in this chat, fairly long so that it gets truncated".into(),
             time: "12:34".into(),
             unread: if i % 3 == 0 { 5 } else { 0 },
             kind: "channel".into(),
@@ -58,25 +58,25 @@ fn layout_shot() {
         .collect();
     ui.set_dialogs(ModelRc::new(VecModel::from(dialogs)));
     ui.set_chat_open(true);
-    ui.set_chat_title("Канал 🇷🇺🇺🇦🇰🇿🏴󠁧󠁢󠁥󠁮󠁧󠁿 с длинным названием 😀".into());
+    ui.set_chat_title("Channel 🇷🇺🇺🇦🇰🇿🏴󠁧󠁢󠁥󠁮󠁧󠁿 with a long name 😀".into());
     let lines = vec![
         ProfileLine {
-            value: "Описание канала: https://example.com/a/very/long/link/without/any/spaces/that/goes/on/and/on/and/on/forever".into(),
-            label: "Описание".into(),
+            value: "Channel description: https://example.com/a/very/long/link/without/any/spaces/that/goes/on/and/on/and/on/forever".into(),
+            label: "Description".into(),
         },
-        ProfileLine { value: "@channel_name".into(), label: "Ссылка".into() },
+        ProfileLine { value: "@channel_name".into(), label: "Link".into() },
     ];
     ui.set_info_lines(ModelRc::new(VecModel::from(lines)));
     let messages: Vec<crate::MessageItem> = (0..4)
         .map(|i| crate::MessageItem {
             id: i,
-            text: "Пост канала с довольно длинным текстом, чтобы он переносился на несколько строк и занимал ширину колонки целиком. https://example.com/very/long/link/without/spaces/at/all/that/goes/on/and/on".into(),
+            text: "A channel post with fairly long text so that it wraps onto several lines and fills the whole column width. https://example.com/very/long/link/without/spaces/at/all/that/goes/on/and/on".into(),
             time: "12:00".into(),
             wide: i % 2 == 0,
             outgoing: i == 3,
             multiline: true,
             tail: true,
-            media: if i == 5 { "Фото".into() } else { "".into() },
+            media: if i == 5 { "Photo".into() } else { "".into() },
             linked: i == 1,
             buttons: if i == 2 {
                 let key = |text: &str, link: bool, row: i32, col: i32| crate::KeyButton { text: text.into(), link, row, col };
@@ -88,10 +88,10 @@ fn layout_shot() {
                 Default::default()
             },
             reply: i >= 2,
-            reply_who: if i == 3 { "Вы".into() } else { "Иван Петров".into() },
-            reply_text: "Текст сообщения, на которое ответили, длинный, чтобы обрезаться в одну строку".into(),
+            reply_who: if i == 3 { "You".into() } else { "John Smith".into() },
+            reply_text: "The text of the message being replied to, long enough to be truncated to one line".into(),
             rich: if i == 1 {
-                let text = "Ссылки: example.com/page и скрытая ссылка, @durov, #новости 😀\n\n  Вторая строка (1. не список) *не жирный*";
+                let text = "Links: example.com/page and a hidden link, @durov, #news 😀\n\n  Second line (1. not a list) *not bold*";
                 let entities = [
                     oxigram_core::store::chats::Entity { kind: "url".into(), offset: 8, length: 16, target: None },
                     oxigram_core::store::chats::Entity {
@@ -114,9 +114,9 @@ fn layout_shot() {
                     (0..3)
                         .map(|state| crate::FileItem {
                             id: i,
-                            name: format!("Отчёт за квартал номер {state} с длинным именем.pdf").into(),
+                            name: format!("Quarterly report number {state} with a long name.pdf").into(),
                             ext: "PDF".into(),
-                            size: if state == 1 { "0,4 МБ из 1,2 МБ".into() } else { "1,2 МБ".into() },
+                            size: if state == 1 { "0.4 MB of 1.2 MB".into() } else { "1.2 MB".into() },
                             state,
                             progress: 0.33,
                         })
@@ -129,7 +129,7 @@ fn layout_shot() {
         })
         .collect();
     ui.set_messages(ModelRc::new(VecModel::from(messages)));
-    ui.set_info_title("Канал".into());
+    ui.set_info_title("Channel".into());
     for (width, height) in [(1690u32, 900u32), (1352, 800), (1170, 800), (1100, 800), (900, 700)] {
         window.set_size(slint::PhysicalSize::new(width, height));
         ui.show().unwrap();
@@ -154,7 +154,7 @@ fn layout_shot() {
     ui.set_version("0.3.0".into());
     ui.set_update_busy(true);
     ui.set_update_progress(0.4);
-    ui.set_update_status("Скачивание… 2,8 МБ из 7,1 МБ".into());
+    ui.set_update_status("Downloading… 2.8 MB of 7.1 MB".into());
     ui.set_settings_page("about".into());
     ui.set_settings_open(true);
     save(&window, 1100, 800, &dir.join("shot-update-about.png"));
