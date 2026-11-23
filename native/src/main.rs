@@ -609,12 +609,24 @@ fn show_state(result: Result<UiState, UiError>) {
 fn wire_main(ui: &AppWindow) {
     // Debug: open the first bot chat and type "/" so the command list can be
     // checked without a pointer.
-    if std::env::var("OXIGRAM_SHOW_COMMANDS").is_ok() {
-        slint::Timer::single_shot(std::time::Duration::from_secs(5), || {
-            let target = with_app(|app| app.dialogs.iter().find(|d| d.bot).map(|d| d.id)).flatten();
+    if let Ok(want) = std::env::var("OXIGRAM_SHOW_COMMANDS") {
+        slint::Timer::single_shot(std::time::Duration::from_secs(5), move || {
+            let target = with_app(|app| {
+                let dialog = if want == "1" {
+                    app.dialogs.iter().find(|d| d.bot)
+                } else {
+                    app.dialogs.iter().find(|d| d.title.contains(want.as_str()))
+                };
+                dialog.map(|d| d.id)
+            })
+            .flatten();
             if let Some(peer) = target {
                 open_chat_at(peer, None);
-                slint::Timer::single_shot(std::time::Duration::from_secs(3), || {
+                let command = want == "1";
+                slint::Timer::single_shot(std::time::Duration::from_secs(3), move || {
+                    if !command {
+                        return;
+                    }
                     with_app(|app| {
                         if let Some(ui) = app.ui.upgrade() {
                             ui.invoke_set_composer("/".into());
